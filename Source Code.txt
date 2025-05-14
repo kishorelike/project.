@@ -1,0 +1,155 @@
+from google.colab import files
+uploaded = files.upload()  # Upload 'Churn_Modelling.csv'
+
+import pandas as pd
+
+df = pd.read_csv("Churn_Modelling.csv")
+df.head()
+
+# Basic shape and column info
+print("Shape:", df.shape)
+print("\nColumns:", df.columns.tolist())
+df.info()
+df.describe()
+
+print("Missing values:\n", df.isnull().sum())
+print("\nDuplicate rows:", df.duplicated().sum())
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Histogram of Exited
+sns.countplot(x='Exited', data=df)
+plt.title('Churn Count')
+plt.show()
+
+# Gender vs Exited
+sns.countplot(x='Gender', hue='Exited', data=df)
+plt.title('Churn by Gender')
+plt.show()
+
+X = df.drop(['RowNumber', 'CustomerId', 'Surname', 'Exited'], axis=1)
+y = df['Exited']
+print("Features:", X.columns.tolist())
+
+from sklearn.preprocessing import LabelEncoder
+
+le_gender = LabelEncoder()
+X['Gender'] = le_gender.fit_transform(X['Gender'])  # Male=1, Female=0
+
+X = pd.get_dummies(X, columns=['Geography'], drop_first=True)
+X.head()
+
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+from sklearn.model_selection import train_test_split
+
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+
+model = Sequential()
+model.add(Dense(16, activation='relu', input_dim=X_train.shape[1]))
+model.add(Dense(8, activation='relu'))
+model.add(Dense(1, activation='sigmoid'))
+
+model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+
+model.fit(X_train, y_train, epochs=50, batch_size=10, verbose=1)
+
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+
+y_pred = (model.predict(X_test) > 0.5).astype("int32")
+print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+print("\nClassification Report:\n", classification_report(y_test, y_pred))
+print("Accuracy Score:", accuracy_score(y_test, y_pred))
+
+new_input = {
+    'CreditScore': 600,
+    'Gender': 'Female',
+    'Age': 40,
+    'Tenure': 3,
+    'Balance': 60000,
+    'NumOfProducts': 2,
+    'HasCrCard': 1,
+    'IsActiveMember': 1,
+    'EstimatedSalary': 50000,
+    'Geography': 'France'
+}
+
+new_df = pd.DataFrame([new_input])
+new_df['Gender'] = le_gender.transform(new_df['Gender'])
+
+# One-hot encode Geography
+new_df = pd.get_dummies(new_df)
+for col in ['Geography_Germany', 'Geography_Spain']:
+    if col not in new_df.columns:
+        new_df[col] = 0
+
+# Ensure correct column order
+new_df = new_df[X.columns]
+
+# Scale
+new_scaled = scaler.transform(new_df)
+
+prediction = model.predict(new_scaled)
+print("Churn Prediction Probability:", prediction[0][0])
+
+!pip install gradio
+
+import gradio as gr
+
+def predict_churn(CreditScore, Gender, Age, Tenure, Balance, NumOfProducts,
+                  HasCrCard, IsActiveMember, EstimatedSalary, Geography):
+    
+    input_data = {
+        'CreditScore': CreditScore,
+        'Gender': Gender,
+        'Age': Age,
+        'Tenure': Tenure,
+        'Balance': Balance,
+        'NumOfProducts': NumOfProducts,
+        'HasCrCard': HasCrCard,
+        'IsActiveMember': IsActiveMember,
+        'EstimatedSalary': EstimatedSalary,
+        'Geography': Geography
+    }
+
+    df_input = pd.DataFrame([input_data])
+    df_input['Gender'] = le_gender.transform(df_input['Gender'])
+
+    df_input = pd.get_dummies(df_input)
+    for col in ['Geography_Germany', 'Geography_Spain']:
+        if col not in df_input.columns:
+            df_input[col] = 0
+
+    df_input = df_input[X.columns]
+    df_input_scaled = scaler.transform(df_input)
+    prediction = model.predict(df_input_scaled)[0][0]
+
+    return f"🔮 Churn Probability: {round(prediction * 100, 2)}%"
+
+iface = gr.Interface(
+    fn=predict_churn,
+    inputs=[
+        gr.Number(label="Credit Score"),
+        gr.Dropdown(['Male', 'Female'], label="Gender"),
+        gr.Number(label="Age"),
+        gr.Number(label="Tenure (years)"),
+        gr.Number(label="Balance"),
+        gr.Number(label="Number of Products"),
+        gr.Number(label="Has Credit Card? (1=Yes, 0=No)"),
+        gr.Number(label="Is Active Member? (1=Yes, 0=No)"),
+        gr.Number(label="Estimated Salary"),
+        gr.Dropdown(['France', 'Germany', 'Spain'], label="Geography"),
+    ],
+    outputs=gr.Text(label="Prediction"),
+    title="🧮 Customer Churn Predictor",
+    description="Enter customer details to predict churn probability."
+)
+
+iface.launch()
